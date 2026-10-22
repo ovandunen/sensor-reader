@@ -8,6 +8,7 @@
 
 #include <Ds18b20Sensor.h>
 #include <Pms5003.h>
+#include <SensorLine.h>
 #include <Sht31dSensor.h>
 
 #include "../../lib/cdc_serial/CdcSerialBegin.h"
@@ -41,32 +42,15 @@ static uint16_t lastPm10 = 0;
 
 static char lineBuf[256];
 
-static void emitSensorsJson(uint32_t uptime, bool sensorError) {
-  if (sensorError) {
-    snprintf(lineBuf, sizeof(lineBuf),
-             "{\"type\":\"sensors\",\"node_id\":\"%s\",\"uptime_ms\":%lu,"
-             "\"temperature_c\":%.1f,\"humidity\":%.1f,\"pm25\":%u,\"pm10\":%u,"
-             "\"ts_ms\":%lu,\"sensor_error\":true}",
-             NODE_ID, static_cast<unsigned long>(uptime), lastTemperatureC, lastHumidity,
-             lastPm25, lastPm10, static_cast<unsigned long>(uptime));
-  } else {
-    snprintf(lineBuf, sizeof(lineBuf),
-             "{\"type\":\"sensors\",\"node_id\":\"%s\",\"uptime_ms\":%lu,"
-             "\"temperature_c\":%.1f,\"humidity\":%.1f,\"pm25\":%u,\"pm10\":%u,"
-             "\"ts_ms\":%lu}",
-             NODE_ID, static_cast<unsigned long>(uptime), lastTemperatureC, lastHumidity,
-             lastPm25, lastPm10, static_cast<unsigned long>(uptime));
-  }
-  Serial.println(lineBuf);
-}
-
 static void runSensorCycle() {
-  bool sensorError = false;
+  bool ds18b20Error = false;
+  bool sht31Error = false;
+  bool pms5003Error = false;
 
   if (ds18b20.read()) {
     lastTemperatureC = ds18b20.temperatureC();
   } else {
-    sensorError = true;
+    ds18b20Error = true;
   }
 
   Pms5003::Reading pmsReading{};
@@ -75,17 +59,29 @@ static void runSensorCycle() {
     lastPm25 = static_cast<uint16_t>(pmsReading.pm2_5_ug_m3);
     lastPm10 = static_cast<uint16_t>(pmsReading.pm10_ug_m3);
   } else {
-    sensorError = true;
+    pms5003Error = true;
   }
 
   if (sht31.read()) {
     lastHumidity = sht31.humidity();
   } else {
-    sensorError = true;
+    sht31Error = true;
   }
 
   const uint32_t uptime = millis();
-  emitSensorsJson(uptime, sensorError);
+  SensorsLine line;
+  line.node_id = NODE_ID;
+  line.uptime_ms = uptime;
+  line.temperature_c = lastTemperatureC;
+  line.humidity = lastHumidity;
+  line.pm25 = lastPm25;
+  line.pm10 = lastPm10;
+  line.ts_ms = uptime;
+  line.ds18b20_error = ds18b20Error;
+  line.sht31_error = sht31Error;
+  line.pms5003_error = pms5003Error;
+  formatSensorsLine(lineBuf, sizeof(lineBuf), line);
+  Serial.println(lineBuf);
 }
 
 void setup() {
